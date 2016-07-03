@@ -8,6 +8,9 @@
     "type": "git",
     "url": "https://github.com/bakkot/normalize-parser-test.git"
   },
+  "directories": {
+    "bin": "bin"
+  },
   "dependencies": {
     "esutils": "^2.0.2",
     "shift-reducer": "^3.0.3",

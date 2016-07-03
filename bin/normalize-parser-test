@@ -1,0 +1,26 @@
+#!/usr/bin/env node
+"use strict";
+
+const fs = require('fs');
+const normalize = require('../');
+
+function usage() {
+  var path = require('path');
+  var scriptName = path.basename(__filename);
+  console.log(`Usage: node ${scriptName} filename
+
+"filename" should be the name of a file and must end in .module.js or .script.js.
+`);
+  process.exit(1);
+}
+
+if (process.argv.length !== 3 || !process.argv[2].match(/(.module.js|.script.js)$/)) {
+  usage();
+}
+
+const f = process.argv[2];
+
+const s = fs.readFileSync(f, 'utf8');
+const e = normalize.default(s, f.match('module'));
+process.stdout.write(e);
+
