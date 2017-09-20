@@ -8,10 +8,13 @@
     "type": "git",
     "url": "https://github.com/bakkot/normalize-parser-test.git"
   },
+  "directories": {
+    "bin": "bin"
+  },
   "dependencies": {
     "esutils": "^2.0.2",
-    "shift-reducer": "^3.0.3",
-    "shift-parser": "^4.1.3"
+    "shift-reducer": "^4.0.0",
+    "shift-parser": "^5.0.0"
   },
   "keywords": [
     "Shift",

@@ -3,8 +3,8 @@
 // import {parseModule, parseScript, Tokenizer} from 'shift-parser';
 // import {keyword} from 'esutils';
 const parser = require('shift-parser');
-const parseScript = parser.parseScript;
-const parseModule = parser.parseModule;
+const parseScript = parser.parseScriptWithLocation;
+const parseModule = parser.parseModuleWithLocation;
 const Tokenizer = parser.Tokenizer;
 const reducer = require('shift-reducer');
 const reduce = reducer.default
@@ -81,7 +81,7 @@ function* nameGen(){
 }
 
 
-function NormalizingReducer(src) { // TODO replace with an ES6 class, set engines field
+function NormalizingReducer(src, locations) { // TODO replace with an ES6 class, set engines field
 
   var red = new MonoidalReducer({empty: ()=>[], concat: function(b){return this.concat(b)}});
   var sup = MonoidalReducer.prototype;
@@ -89,10 +89,19 @@ function NormalizingReducer(src) { // TODO replace with an ES6 class, set engine
   var seen = new Map;
   var gen = nameGen();
 
-  var offset = 0;
   var numberCounter = 1;
-  Object.defineProperty(red, 'reduceBindingIdentifier', {value: function(node, obj) {
-    if (node.loc && !isInterestingName(extract(src, node.loc))) {
+
+  function length(node) {
+    var location = locations.get(node);
+    return src.slice(location.start.offset, location.end.offset).trim().length;
+  }
+
+  function offset(node) {
+    return locations.get(node).start.offset;
+  }
+
+  function reduceVariableReference(node, obj) {
+    if (locations.get(node) && !isInterestingName(extract(src, locations.get(node)))) {
       var name;
       if (seen.has(node.name)) {
         name = seen.get(node.name);
@@ -100,25 +109,16 @@ function NormalizingReducer(src) { // TODO replace with an ES6 class, set engine
         name = gen.next().value;
         seen.set(node.name, name);
       }
-      return [{offset: node.loc.start.offset, length: node.loc.end.offset - node.loc.start.offset, value: name}];
+      return [{offset: offset(node), length: length(node), value: name}];
     }
     return [];
-  }});
-  Object.defineProperty(red, 'reduceIdentifierExpression', {value: function(node, obj) {
-    if (node.loc && !isInterestingName(extract(src, node.loc))) {
-      var name;
-      if (seen.has(node.name)) {
-        name = seen.get(node.name);
-      } else {
-        name = gen.next().value;
-        seen.set(node.name, name);
-      }
-      return [{offset: node.loc.start.offset, length: node.loc.end.offset - node.loc.start.offset, value: name}];
-    }
-    return [];
-  }});
+  }
+  Object.defineProperty(red, 'reduceAssignmentTargetIdentifier', {value: reduceVariableReference});
+  Object.defineProperty(red, 'reduceBindingIdentifier', {value: reduceVariableReference});
+  Object.defineProperty(red, 'reduceIdentifierExpression', {value: reduceVariableReference});
+
   Object.defineProperty(red, 'reduceLiteralNumericExpression', {value: function(node, obj) {
-    var rawValue = extract(src, node.loc);
+    var rawValue = extract(src, locations.get(node));
     if (!isInterestingNumber(rawValue)) {
       var value;
       if (seen.has(rawValue)) {
@@ -127,12 +127,12 @@ function NormalizingReducer(src) { // TODO replace with an ES6 class, set engine
         value = '' + numberCounter++;
         //seen.set(rawValue, value); // todo consider if we want number duplication
       }
-      return [{offset: node.loc.start.offset, length: node.loc.end.offset - node.loc.start.offset, value: value}];
+      return [{offset: offset(node), length: length(node), value: value}];
     }
     return [];
   }});
   Object.defineProperty(red, 'reduceLiteralStringExpression', {value: function(node, obj) {
-    var rawValue = extract(src, node.loc);
+    var rawValue = extract(src, locations.get(node));
     if (!isInterestingString(rawValue.slice(1, -1))) {
       var value;
       if (seen.has(node.value)) {
@@ -142,13 +142,14 @@ function NormalizingReducer(src) { // TODO replace with an ES6 class, set engine
         seen.set(node.value, value);
       }
       value = rawValue[0] + value + rawValue[rawValue.length - 1];
-      return [{offset: node.loc.start.offset, length: node.loc.end.offset - node.loc.start.offset, value: value}];
+      return [{offset: offset(node), length: length(node), value: value}];
     }
     return [];
   }});
-  Object.defineProperty(red, 'reduceStaticMemberExpression', {value: function(node, obj) {
-    var orig = sup.reduceStaticMemberExpression.call(this, node, obj);
-    var loc = {start: {offset: node.loc.end.offset - node.property.length}, end: {offset: node.loc.end.offset}};
+
+  function reduceStaticMember(node, obj) {
+    var orig = obj.object;
+    var loc = {start: {offset: locations.get(node).end.offset - node.property.length}, end: {offset: locations.get(node).end.offset}};
     var rawValue = extract(src, loc);
     if (rawValue === node.property && !isInterestingString(rawValue)) {
       var value;
@@ -161,10 +162,13 @@ function NormalizingReducer(src) { // TODO replace with an ES6 class, set engine
       return orig.concat([{offset: loc.start.offset, length: loc.end.offset - loc.start.offset, value: value}]);
     }
     return orig;
-  }});
+  }
+  Object.defineProperty(red, 'reduceStaticMemberAssignmentTarget', {value: reduceStaticMember});
+  Object.defineProperty(red, 'reduceStaticMemberExpression', {value: reduceStaticMember});
+
   Object.defineProperty(red, 'reduceStaticPropertyName', {value: function(node, obj) {
     var orig = sup.reduceStaticPropertyName.call(this, node, obj);
-    var rawValue = extract(src, node.loc);
+    var rawValue = extract(src, locations.get(node));
     var isQuoted = rawValue[0] === '"' || rawValue[0] === '\'';
     var strippedValue = isQuoted ? rawValue.slice(1, -1) : rawValue;
     if (strippedValue === node.value && !isInterestingString(strippedValue)) {
@@ -178,13 +182,13 @@ function NormalizingReducer(src) { // TODO replace with an ES6 class, set engine
       if (isQuoted) {
         value = rawValue[0] + value + rawValue[rawValue.length - 1];
       }
-      return orig.concat([{offset: node.loc.start.offset, length: node.loc.end.offset - node.loc.start.offset, value: value}]);
+      return orig.concat([{offset: offset(node), length: length(node), value: value}]);
     }
     return orig;
   }});
   Object.defineProperty(red, 'reduceLabeledStatement', {value: function(node, obj) {
     var orig = sup.reduceLabeledStatement.call(this, node, obj);
-    var loc = {start: {offset: node.loc.start.offset}, end: {offset: node.loc.start.offset + node.label.length}};
+    var loc = {start: {offset: offset(node)}, end: {offset: offset(node) + node.label.length}};
     var rawValue = extract(src, loc);
     if (rawValue === node.label && !isInterestingString(rawValue)) {
       var value;
@@ -198,11 +202,12 @@ function NormalizingReducer(src) { // TODO replace with an ES6 class, set engine
     }
     return orig;
   }});
-  Object.defineProperty(red, 'reduceBreakStatement', {value: function(node, obj) {
-    var orig = sup.reduceBreakStatement.call(this, node, obj);
+
+  function reduceBreakContinue(node, obj) {
+    var orig = this.identity;
     if (node.label === null) return orig;
-    var labelOffset = getOffsetOfLabel(extract(src, node.loc));
-    var loc = {start: {offset: node.loc.start.offset + labelOffset}, end: {offset: node.loc.start.offset + labelOffset + node.label.length}};
+    var labelOffset = getOffsetOfLabel(extract(src, locations.get(node)));
+    var loc = {start: {offset: offset(node) + labelOffset}, end: {offset: offset(node) + labelOffset + node.label.length}};
     var rawValue = extract(src, loc);
     if (rawValue === node.label && !isInterestingString(rawValue)) {
       var value;
@@ -215,28 +220,13 @@ function NormalizingReducer(src) { // TODO replace with an ES6 class, set engine
       return orig.concat([{offset: loc.start.offset, length: loc.end.offset - loc.start.offset, value: value}]);
     }
     return orig;
-  }});
-  Object.defineProperty(red, 'reduceContinueStatement', {value: function(node, obj) {
-    var orig = sup.reduceContinueStatement.call(this, node, obj);
-    if (node.label === null) return orig;
-    var labelOffset = getOffsetOfLabel(extract(src, node.loc));
-    var loc = {start: {offset: node.loc.start.offset + labelOffset}, end: {offset: node.loc.start.offset + labelOffset + node.label.length}};
-    var rawValue = extract(src, loc);
-    if (rawValue === node.label && !isInterestingString(rawValue)) {
-      var value;
-      if (seen.has(rawValue)) {
-        value = seen.get(rawValue);
-      } else {
-        value = gen.next().value;
-        seen.set(rawValue, value);
-      }
-      return orig.concat([{offset: loc.start.offset, length: loc.end.offset - loc.start.offset, value: value}]);
-    }
-    return orig;
-  }});
-  Object.defineProperty(red, 'reduceExportSpecifier', {value: function(node, obj) {
+  }
+  Object.defineProperty(red, 'reduceBreakStatement', {value: reduceBreakContinue});
+  Object.defineProperty(red, 'reduceContinueStatement', {value: reduceBreakContinue});
+
+  Object.defineProperty(red, 'reduceExportFromSpecifier', {value: function reduceExportSpecifier(node, obj) {
     var ret = [];
-    var nameLoc = getTokenLoc(src, node.loc, 0);
+    var nameLoc = getTokenLoc(src, locations.get(node), 0);
     var rawValue = extract(src, nameLoc);
     var name;
     if (node.name) {
@@ -249,7 +239,7 @@ function NormalizingReducer(src) { // TODO replace with an ES6 class, set engine
         }
         ret.push({offset: nameLoc.start.offset, length: nameLoc.end.offset - nameLoc.start.offset, value: name});
       }
-      nameLoc = getTokenLoc(src, node.loc, 2);
+      nameLoc = getTokenLoc(src, locations.get(node), 2);
       rawValue = extract(src, nameLoc);
     }
     if (rawValue === node.exportedName && !isInterestingName(rawValue)) {
@@ -263,10 +253,29 @@ function NormalizingReducer(src) { // TODO replace with an ES6 class, set engine
     }
     return ret;
   }});
+
+  Object.defineProperty(red, 'reduceExportLocalSpecifier', {value: function reduceExportSpecifier(node, obj) {
+    var ret = sup.reduceExportLocalSpecifier.call(this, node, obj);
+    if (node.exportedName == null) return ret;
+    var nameLoc = getTokenLoc(src, locations.get(node), 2);
+    var rawValue = extract(src, nameLoc);
+    var name;
+    if (rawValue === node.exportedName && !isInterestingName(rawValue)) {
+      if (seen.has(node.exportedName)) {
+        name = seen.get(node.exportedName);
+      } else {
+        name = gen.next().value;
+        seen.set(node.exportedName, name);
+      }
+      ret.push({offset: nameLoc.start.offset, length: nameLoc.end.offset - nameLoc.start.offset, value: name});
+    }
+    return ret;
+  }});
+
   Object.defineProperty(red, 'reduceImportSpecifier', {value: function(node, obj) {
     var orig = sup.reduceImportSpecifier.call(this, node, obj);
     if (node.name) {
-      var nameLoc = getTokenLoc(src, node.loc, 0);
+      var nameLoc = getTokenLoc(src, locations.get(node), 0);
       var rawValue = extract(src, nameLoc);
       if (rawValue === node.name && !isInterestingName(rawValue)) {
         var name;
@@ -282,7 +291,7 @@ function NormalizingReducer(src) { // TODO replace with an ES6 class, set engine
     return orig;
   }});  
   Object.defineProperty(red, 'reduceExportAllFrom', {value: function(node, obj) {
-    var moduleLoc = getTokenLoc(src, node.loc, -1);
+    var moduleLoc = getTokenLoc(src, locations.get(node), -1);
     var rawValue = extract(src, moduleLoc);
     if (!isInterestingString(rawValue.slice(1, -1))) {
       var value;
@@ -299,7 +308,7 @@ function NormalizingReducer(src) { // TODO replace with an ES6 class, set engine
   }});
   Object.defineProperty(red, 'reduceExportFrom', {value: function(node, obj) {
     var orig = sup.reduceExportFrom.call(this, node, obj);
-    var moduleLoc = getTokenLoc(src, node.loc, -1);
+    var moduleLoc = getTokenLoc(src, locations.get(node), -1);
     var rawValue = extract(src, moduleLoc);
     if (!isInterestingString(rawValue.slice(1, -1))) {
       var value;
@@ -316,7 +325,7 @@ function NormalizingReducer(src) { // TODO replace with an ES6 class, set engine
   }});
   Object.defineProperty(red, 'reduceImport', {value: function(node, obj) {
     var orig = sup.reduceImport.call(this, node, obj);
-    var moduleLoc = getTokenLoc(src, node.loc, -1);
+    var moduleLoc = getTokenLoc(src, locations.get(node), -1);
     var rawValue = extract(src, moduleLoc);
     if (!isInterestingString(rawValue.slice(1, -1))) {
       var value;
@@ -333,7 +342,7 @@ function NormalizingReducer(src) { // TODO replace with an ES6 class, set engine
   }});
   Object.defineProperty(red, 'reduceImportNamespace', {value: function(node, obj) {
     var orig = sup.reduceImportNamespace.call(this, node, obj);
-    var moduleLoc = getTokenLoc(src, node.loc, -1);
+    var moduleLoc = getTokenLoc(src, locations.get(node), -1);
     var rawValue = extract(src, moduleLoc);
     if (!isInterestingString(rawValue.slice(1, -1))) {
       var value;
@@ -353,7 +362,8 @@ function NormalizingReducer(src) { // TODO replace with an ES6 class, set engine
 }
 
 module.exports.default = function normalize(src, isModule) {
-  var effects = reduce(new NormalizingReducer(src), (isModule ? parseModule : parseScript)(src, {loc: true, earlyErrors: false}));
+  var info = (isModule ? parseModule : parseScript)(src, {loc: true, earlyErrors: false});
+  var effects = reduce(new NormalizingReducer(src, info.locations), info.tree);
 
   var newSrc = src.split(''); // not the same as `Array.from(src)`, because unicode.
   effects.sort((a,b) => b.offset - a.offset); // this sort is in descending order of offset
