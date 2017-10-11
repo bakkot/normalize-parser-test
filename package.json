@@ -1,6 +1,6 @@
 {
   "name": "normalize-parser-test",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Normalize parser tests",
   "author": "Kevin Gibbons",
   "homepage": "https://github.com/bakkot/normalize-parser-test",
@@ -13,8 +13,8 @@
   },
   "dependencies": {
     "esutils": "^2.0.2",
-    "shift-reducer": "^4.0.0",
-    "shift-parser": "^5.0.0"
+    "shift-reducer": "^4.0.1",
+    "shift-parser": "^5.2.2"
   },
   "keywords": [
     "Shift",
