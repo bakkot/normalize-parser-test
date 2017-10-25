@@ -368,7 +368,7 @@ module.exports.default = function normalize(src, isModule) {
   var newSrc = src.split(''); // not the same as `Array.from(src)`, because unicode.
   effects.sort((a,b) => b.offset - a.offset); // this sort is in descending order of offset
   effects.forEach(effect => {
-    newSrc.splice(effect.offset, effect.length, ...effect.value);
+    [].splice.apply(newSrc, [effect.offset, effect.length].concat(effect.value.split('')));
   });
   return newSrc.join('');
 }
