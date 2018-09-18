@@ -12,7 +12,7 @@ const MonoidalReducer = reducer.MonoidalReducer;
 const keyword = require('esutils').keyword;
 
 
-let commonWords = ['async', 'get', 'set', 'Infinity', 'NaN', 'constructor', 'prototype', 'default'];
+let commonWords = ['async', 'await', 'get', 'set', 'Infinity', 'NaN', 'constructor', 'prototype', 'default'];
 
 function isInterestingName(str) {
   return Array.from(str).some(x => x.charCodeAt(0) >= 128) || str.match(/__|\\|\n|\r/) || str === '*default*' || keyword.isRestrictedWord(str) || keyword.isKeywordES6(str, true) || keyword.isReservedWordES6(str, true) || commonWords.indexOf(str) !== -1;
