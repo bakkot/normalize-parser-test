@@ -361,8 +361,18 @@ function NormalizingReducer(src, locations) { // TODO replace with an ES6 class,
   return red;
 }
 
-module.exports.default = function normalize(src, isModule) {
-  var info = (isModule ? parseModule : parseScript)(src, {loc: true, earlyErrors: false});
+module.exports.default = function normalize(src, options = {}) {
+  if ('isModule' in options && 'parseFn' in options) {
+    throw new TypeError('you cannot provide both isModule and parseFn');
+  }
+
+  var parseFn = 'parseFn' in options
+    ? options.parseFn
+    : options.isModule
+      ? src => parseModule(src, { earlyErrors: false })
+      : src => parseScript(src, { earlyErrors: false });
+
+  var info = parseFn(src);
   var effects = reduce(new NormalizingReducer(src, info.locations), info.tree);
 
   var newSrc = src.split(''); // not the same as `Array.from(src)`, because unicode.
